@@ -121,10 +121,18 @@ async function runJob({ url = null, auto = false } = {}) {
       for (const page of cfg.pages) {
         await log(`Quét page: ${page.replace('https://www.facebook.com/', '')}`);
         fb = await openFb(page, fb);
-        const r = await inTab(fb, fbScan, [6, page]);
+        const r = await inTab(fb, fbScan, [15, page]);
         if (!r || !r.ok) throw Object.assign(new Error(fbError(r && r.code)), { code: r && r.code });
         await log(`  -> ${r.urls.length} bài`);
         candidates.push(...r.urls);
+        // Tài khoản admin: đẩy bài quét được lên danh sách chung cho team (người khác không có quyền -> bỏ qua)
+        if (r.urls.length) {
+          sb('/rest/v1/posts?on_conflict=url', {
+            method: 'POST', token: s.access_token,
+            headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+            body: [...r.urls].reverse().map((url) => ({ url, page_url: page })),
+          }).catch(() => {});
+        }
       }
       candidates.push(...common.map((x) => x.url));
       target = candidates.find((u) => !done.has(u));
