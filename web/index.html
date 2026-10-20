@@ -57,8 +57,61 @@
       <div class="num" id="pCount">0</div>
     </div>
 
+    <div class="card wide" id="extCard">
+      <h2>🤖 Tự động share <span class="pill" id="extPill"></span></h2>
+
+      <div id="extMissing" hidden>
+        <div class="lbl" style="margin-bottom:10px">Cài extension <b>một lần</b> để bot tự quét page, chọn <b>Công khai</b> và share giúp bạn mỗi ngày — không cần bấm tay.</div>
+        <a href="zeno-share-extension.zip" download><button class="primary">⬇ Tải extension</button></a>
+        <ol class="steps" style="margin-top:12px">
+          <li>Giải nén file vừa tải (chuột phải → <b>Extract All / Giải nén</b>).</li>
+          <li>Mở tab mới, gõ <b>chrome://extensions</b> <button class="sm" onclick="copyText('chrome://extensions')">Copy</button> → bật <b>Developer mode</b> (góc phải trên).</li>
+          <li>Bấm <b>Load unpacked</b> → chọn thư mục <b>zeno-share-extension</b>.</li>
+          <li>Quay lại trang này, bấm <b>F5</b>.</li>
+        </ol>
+        <div class="lbl">Chỉ dùng được trên Chrome/Edge máy tính. Điện thoại vẫn dùng nút Share bên dưới.</div>
+      </div>
+
+      <div id="extConnect" hidden>
+        <div class="lbl" style="margin-bottom:8px">Extension đã cài. Nhập lại mật khẩu để kết nối extension với tài khoản <b id="extEmail"></b>.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="extPass" type="password" placeholder="Mật khẩu" style="flex:1;min-width:180px" onkeydown="if(event.key==='Enter')connectExt()">
+          <button class="primary" onclick="connectExt()">Kết nối</button>
+        </div>
+        <div class="err" id="extErr"></div>
+      </div>
+
+      <div id="extReady" hidden>
+        <div id="extWarn"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+          <button class="primary" id="extRun" onclick="runExt()">🤖 Tự share 1 bài ngay</button>
+          <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-weight:600">
+            <input type="checkbox" id="extAuto" onchange="saveExt()"> Tự share mỗi ngày</label>
+          <span class="lbl">từ</span>
+          <select id="extHour" onchange="saveExt()"></select>
+          <select id="extPerDay" onchange="saveExt()">
+            <option value="1">1 bài/ngày</option><option value="2">2 bài/ngày</option><option value="3">3 bài/ngày</option>
+          </select>
+        </div>
+        <div class="lbl" id="extStatus"></div>
+
+        <div style="margin-top:14px"><b>Page lấy bài</b></div>
+        <div id="extPages"></div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <input id="extNewPage" placeholder="Dán link page, vd: https://www.facebook.com/zenodigital.official" style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter')addExtPage()">
+          <button onclick="addExtPage()">+ Thêm page</button>
+        </div>
+
+        <details style="margin-top:14px">
+          <summary class="lbl" style="cursor:pointer">Nhật ký bot</summary>
+          <pre id="extLog" style="background:#10151f;color:#c9d4e5;border-radius:8px;padding:10px;max-height:220px;overflow:auto;font:12px/1.6 Consolas,monospace;white-space:pre-wrap"></pre>
+        </details>
+        <div class="lbl" style="margin-top:10px">Bot chạy khi Chrome đang mở (thu nhỏ cũng được). Lúc share sẽ có 1 cửa sổ Facebook nhỏ bật lên khoảng 1 phút rồi tự đóng — đừng tắt nó.</div>
+      </div>
+    </div>
+
     <div class="card wide">
-      <h2>📌 Cách share</h2>
+      <h2>📌 Share bằng tay</h2>
       <ol class="steps">
         <li>Bấm <b>Share</b> ở một bài. Caption được <b>copy sẵn</b>, cửa sổ Facebook mở ra.</li>
         <li>Chọn đối tượng <b>Công khai</b>, dán caption (<b>Ctrl+V</b>), bấm <b>Đăng</b>.</li>
@@ -142,6 +195,7 @@ async function doAuth() {
   $('authBtn').disabled = false;
   if (r.error) return ($('authErr').textContent = viErr(r.error.message));
   if (!r.data.session) return ($('authErr').textContent = 'Kiểm tra email để xác nhận tài khoản.');
+  if (hasExt()) await ext('connect', { email, password }).catch(() => {});
   boot();
 }
 async function signOut() { await sb.auth.signOut(); location.reload(); }
@@ -157,6 +211,7 @@ async function boot() {
   await sb.from('profiles').upsert({ id: user.id, email: user.email, name: name || null, last_seen: new Date().toISOString() });
   sb.from('admins').select('email').then(({ data }) => { $('adminLink').hidden = !(data && data.length); });
   load();
+  setTimeout(refreshExt, 300); // chờ extension gắn cầu nối vào trang
 }
 
 async function load() {
@@ -193,7 +248,8 @@ function render(from = (() => { const d = new Date(); d.setDate(1); d.setHours(0
       </div>
       ${done ? '<span class="pill ok">Đã share</span>' : '<span class="pill mid">Chưa share</span>'}
       <button class="sm" onclick="togglePreview(${p.id})">${previews.has(p.id) ? 'Ẩn' : 'Xem trước'}</button>
-      <button class="${done ? '' : 'primary'}" onclick="startShare(${p.id})">${done ? 'Share lại' : 'Share'}</button>
+      ${extReady() && !done ? `<button class="primary" onclick="runExt('${esc(p.url)}')">🤖 Tự share</button>` : ''}
+      <button class="${done || extReady() ? '' : 'primary'}" onclick="startShare(${p.id})">${done ? 'Share lại' : 'Share tay'}</button>
       ${previews.has(p.id) ? `<iframe class="preview" loading="lazy" height="520"
         src="https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(p.url)}&show_text=true&width=500"></iframe>` : ''}
     </div>`;
@@ -235,6 +291,110 @@ async function markShared() {
   toast('Đã ghi nhận! 🎉');
   load();
 }
+
+// ---------- Extension ----------
+const hasExt = () => document.documentElement.getAttribute('data-zeno-ext');
+let extState = null, extPagesKey = '';
+const extReady = () => !!(extState && extState.user && user && extState.user.id === user.id);
+
+function ext(type, payload) {
+  return new Promise((resolve, reject) => {
+    const id = Math.random().toString(36).slice(2);
+    const on = (e) => {
+      if (e.source !== window || !e.data || e.data.zeno !== 'res' || e.data.id !== id) return;
+      window.removeEventListener('message', on); clearTimeout(t);
+      e.data.error ? reject(new Error(e.data.error)) : resolve(e.data.result);
+    };
+    const t = setTimeout(() => { window.removeEventListener('message', on); reject(new Error('Extension không phản hồi, thử F5.')); }, 15000);
+    window.addEventListener('message', on);
+    window.postMessage({ zeno: 'req', id, type, payload }, location.origin);
+  });
+}
+
+function copyText(t) { navigator.clipboard.writeText(t).then(() => toast('Đã copy: ' + t)); }
+
+(() => { for (let h = 5; h <= 22; h++) $('extHour').insertAdjacentHTML('beforeend', `<option value="${h}">${h}:00</option>`); })();
+
+async function refreshExt() {
+  if (!user || $('appView').hidden) return;
+  const before = extReady();
+  if (hasExt()) { try { extState = await ext('getState'); } catch { extState = null; } }
+  renderExt();
+  if (before !== extReady()) render();
+}
+
+function renderExt() {
+  const installed = !!hasExt();
+  const ready = extReady();
+  $('extMissing').hidden = installed;
+  $('extConnect').hidden = !installed || ready;
+  $('extReady').hidden = !ready;
+  $('extEmail').textContent = user ? user.email : '';
+  $('extPill').className = 'pill ' + (ready ? 'ok' : installed ? 'mid' : 'low');
+  $('extPill').textContent = ready ? `Extension v${extState.version} đã kết nối` : installed ? 'Chưa kết nối' : 'Chưa cài extension';
+  if (!ready) return;
+
+  const { settings: cfg, state: st } = extState;
+  if (document.activeElement?.closest?.('#extReady') == null) {
+    $('extAuto').checked = cfg.auto; $('extHour').value = cfg.hour; $('extPerDay').value = cfg.perDay;
+  }
+  const key = JSON.stringify(cfg.pages);
+  if (key !== extPagesKey) {
+    extPagesKey = key;
+    $('extPages').innerHTML = cfg.pages.length ? '<table>' + cfg.pages.map((p, i) => `<tr><td><a href="${esc(p)}" target="_blank">${esc(p)}</a></td>
+      <td style="width:60px"><button class="sm danger" onclick="removeExtPage(${i})">Xóa</button></td></tr>`).join('') + '</table>'
+      : '<div class="lbl">Chưa có page — bot sẽ chỉ share các bài trong danh sách bên dưới.</div>';
+  }
+  const last = st.lastResult;
+  $('extRun').disabled = !!st.running;
+  $('extRun').textContent = st.running ? '⏳ Bot đang chạy…' : '🤖 Tự share 1 bài ngay';
+  $('extStatus').innerHTML = [
+    cfg.auto ? `✅ Đang bật tự share <b>${cfg.perDay} bài/ngày</b>, từ khoảng <b>${cfg.hour}:00</b>.` : 'Tự share mỗi ngày đang <b>tắt</b>.',
+    last ? `Lần gần nhất (${new Date(last.at).toLocaleString('vi-VN')}): ${last.ok ? (last.nothing ? 'không còn bài mới' : '<b style="color:var(--green)">share thành công</b>') : `<b style="color:var(--red)">${esc(last.error)}</b>`}` : '',
+  ].filter(Boolean).join('<br>');
+  $('extWarn').innerHTML = st.needFb ? `<div class="card" style="background:var(--red-soft);border-color:transparent;color:var(--red);margin-bottom:12px">
+    ⚠️ ${st.needFb === 'checkpoint' ? 'Facebook đang yêu cầu xác minh nick.' : 'Facebook trên Chrome đã đăng xuất.'}
+    <a href="https://www.facebook.com" target="_blank"><b>Mở Facebook</b></a> để đăng nhập/xác minh rồi bấm Tự share lại.</div>` : '';
+  const logEl = $('extLog'), atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 20;
+  logEl.textContent = (st.logs || []).join('\n') || 'Chưa có hoạt động.';
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function connectExt() {
+  $('extErr').textContent = '';
+  try { await ext('connect', { email: user.email, password: $('extPass').value }); $('extPass').value = ''; toast('Đã kết nối extension'); refreshExt(); }
+  catch (e) { $('extErr').textContent = e.message; }
+}
+async function saveExt(patch = {}) {
+  try {
+    await ext('saveSettings', { auto: $('extAuto').checked, hour: +$('extHour').value, perDay: +$('extPerDay').value, ...patch });
+    toast('Đã lưu'); document.activeElement?.blur?.(); refreshExt();
+  } catch (e) { toast(e.message); }
+}
+function addExtPage() {
+  let v = $('extNewPage').value.trim();
+  if (!v) return;
+  if (!/^https?:\/\//.test(v)) v = 'https://www.facebook.com/' + v.replace(/^\/+/, '');
+  if (!/facebook\.com/.test(v)) return toast('Link phải là trang facebook.com');
+  v = /profile\.php/.test(v) ? v : v.split('?')[0].replace(/\/$/, '');
+  const pages = extState.settings.pages;
+  if (pages.includes(v)) return toast('Page này đã có');
+  $('extNewPage').value = '';
+  saveExt({ pages: [...pages, v] });
+}
+function removeExtPage(i) { saveExt({ pages: extState.settings.pages.filter((_, k) => k !== i) }); }
+async function runExt(url) {
+  try { await ext('runNow', url ? { url } : {}); toast('Bot bắt đầu chạy — cửa sổ Facebook sẽ bật lên'); refreshExt(); }
+  catch (e) { toast(e.message); }
+}
+// Bot chạy xong -> tải lại tiến độ
+let wasRunning = false;
+setInterval(async () => {
+  await refreshExt();
+  const r = !!extState?.state?.running;
+  if (wasRunning && !r) load();
+  wasRunning = r;
+}, 2500);
 
 document.querySelectorAll('.tabs button').forEach((b) => b.onclick = () => {
   filter = b.dataset.f;

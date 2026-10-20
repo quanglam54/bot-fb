@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Zeno Share Bot",
+  "version": "1.0.0",
+  "description": "Tự share bài page công ty lên trang cá nhân và ghi nhận chỉ tiêu.",
+  "permissions": ["storage", "alarms", "tabs", "scripting"],
+  "host_permissions": [
+    "https://www.facebook.com/*",
+    "https://siywbzecmbzwpfnosxob.supabase.co/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://bot-fb.netlify.app/*", "http://localhost:3000/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "Zeno Share Bot" }
+}

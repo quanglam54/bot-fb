@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<style>
+  body { width: 300px; margin: 0; padding: 14px; font: 13px/1.5 "Segoe UI", system-ui, sans-serif; color: #1c2333; }
+  h1 { font-size: 15px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+  .logo { width: 24px; height: 24px; border-radius: 6px; background: #1877f2; color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+  .row { margin: 6px 0; color: #6b7489; }
+  .row b { color: #1c2333; }
+  .warn { background: #fdeaea; color: #d93636; padding: 8px; border-radius: 8px; margin: 8px 0; }
+  button { width: 100%; margin-top: 8px; padding: 8px; border-radius: 8px; border: 1px solid #e3e7ef; background: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  button.primary { background: #1877f2; border-color: #1877f2; color: #fff; }
+  button:disabled { opacity: .5; }
+</style>
+</head>
+<body>
+  <h1><span class="logo">f</span> Zeno Share Bot</h1>
+  <div id="body">Đang tải…</div>
+  <button class="primary" id="run">🤖 Tự share 1 bài ngay</button>
+  <button id="open">Mở trang quản lý share</button>
+  <script src="config.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
