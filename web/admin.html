@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quản lý share</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<style>
+  th.sort { cursor: pointer; user-select: none; }
+  .detail td { background: #fafbfd; font-size: 13px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .ubar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; min-width: 90px; }
+  .ubar > div { height: 100%; }
+  [data-tab] { display: none; }
+  [data-tab].show { display: contents; }
+</style>
+</head>
+<body>
+
+<div id="login" class="auth">
+  <div class="box">
+    <div class="logo">f</div>
+    <h2>Trang quản lý</h2>
+    <div class="lbl">Đăng nhập bằng email admin.</div>
+    <input id="email" type="email" placeholder="Email">
+    <input id="pass" type="password" placeholder="Mật khẩu" onkeydown="if(event.key==='Enter')signIn()">
+    <div class="err" id="err"></div>
+    <button class="primary" onclick="signIn()">Đăng nhập</button>
+    <div class="switch"><a href="./">← Về trang share</a></div>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <div class="logo">f</div>
+    <h1>Quản lý share bài</h1>
+    <div class="tabs" id="tabs">
+      <button class="active" data-t="progress">📊 Tiến độ</button>
+      <button data-t="posts">📰 Bài viết</button>
+      <button data-t="settings">⚙️ Caption & cài đặt</button>
+    </div>
+    <div class="spacer"></div>
+    <a href="./"><button class="sm">Trang share</button></a>
+    <span class="lbl" id="me"></span>
+    <button class="sm" onclick="signOut()">Đăng xuất</button>
+  </header>
+  <main>
+    <!-- Tiến độ -->
+    <div data-tab="progress" class="show">
+      <div class="card"><div class="lbl">Người dùng</div><div class="num" id="sUsers">0</div></div>
+      <div class="card"><div class="lbl">Tổng bài share trong tháng</div><div class="num" id="sShares">0</div></div>
+      <div class="card"><div class="lbl">Đã đạt chỉ tiêu</div><div class="num" id="sDone">0</div></div>
+      <div class="card"><div class="lbl">Share hôm nay</div><div class="num" id="sToday">0</div></div>
+      <div class="card wide">
+        <div class="toolbar">
+          <b>Tháng</b> <select id="month"></select>
+          <span class="lbl">Chỉ tiêu: <b id="tgtLbl">11</b> bài</span>
+          <input id="search" placeholder="Tìm tên / email" style="flex:1;min-width:160px">
+          <button onclick="load()">↻ Làm mới</button>
+          <button onclick="exportCsv()">⬇ Xuất CSV</button>
+        </div>
+        <div class="scroll"><table id="tbl"></table></div>
+      </div>
+    </div>
+
+    <!-- Bài viết -->
+    <div data-tab="posts">
+      <div class="card wide">
+        <h2>➕ Thêm bài cần share</h2>
+        <div class="lbl" style="margin-bottom:8px">Dán link bài (mỗi dòng 1 link). Bot trên máy admin cũng tự đẩy bài mới lên đây mỗi lần quét.</div>
+        <textarea id="newPosts" placeholder="https://www.facebook.com/zenodigital.official/posts/..."></textarea>
+        <button class="primary" style="margin-top:8px" onclick="addPosts()">Thêm</button>
+      </div>
+      <div class="card wide">
+        <h2>📰 Danh sách bài <span class="lbl" id="postCount"></span></h2>
+        <div class="scroll"><table id="postTbl"></table></div>
+      </div>
+    </div>
+
+    <!-- Caption & cài đặt -->
+    <div data-tab="settings">
+      <div class="card half">
+        <h2>💬 Caption gợi ý (mỗi dòng 1 câu)</h2>
+        <textarea id="caps" style="min-height:220px"></textarea>
+        <button class="primary" style="margin-top:8px" onclick="saveCaptions()">Lưu caption</button>
+      </div>
+      <div class="card half">
+        <h2>🎯 Chỉ tiêu</h2>
+        <div class="toolbar"><span>Số bài mỗi tháng</span><input id="target" type="number" min="1" style="width:90px">
+          <button class="primary" onclick="saveTarget()">Lưu</button></div>
+        <div class="lbl">Áp dụng cho trang share của mọi người và bảng tiến độ.</div>
+      </div>
+    </div>
+  </main>
+</div>
+<div id="toast"></div>
+
+<script>
+const sb = supabase.createClient(window.SB_URL, window.SB_KEY);
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ymd = (d) => new Date(d).toLocaleDateString('sv-SE');
+const short = (u) => u.replace('https://www.facebook.com/', '');
+function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); }
+
+let profiles = [], shares = [], posts = [], target = 11, open = new Set(), sortKey = 'count', sortDir = -1, rowsCache = [];
+
+(() => {
+  const now = new Date();
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    $('month').insertAdjacentHTML('beforeend', `<option value="${ymd(d).slice(0, 7)}">${d.getMonth() + 1}/${d.getFullYear()}</option>`);
+  }
+})();
+
+document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => {
+  document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('active', x === b));
+  document.querySelectorAll('[data-tab]').forEach((s) => s.classList.toggle('show', s.dataset.tab === b.dataset.t));
+});
+
+async function signIn() {
+  $('err').textContent = '';
+  const { error } = await sb.auth.signInWithPassword({ email: $('email').value.trim(), password: $('pass').value });
+  if (error) $('err').textContent = /Invalid login/.test(error.message) ? 'Sai email hoặc mật khẩu.' : error.message;
+  else boot();
+}
+async function signOut() { await sb.auth.signOut(); location.reload(); }
+
+async function boot() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return;
+  const { data: adm } = await sb.from('admins').select('email');
+  if (!adm || !adm.length) {
+    $('err').innerHTML = 'Email này không có quyền admin. <a href="./">Về trang share</a>';
+    return;
+  }
+  $('login').hidden = true; $('app').hidden = false;
+  $('me').textContent = session.user.email;
+  load();
+}
+
+async function load() {
+  const from = new Date($('month').value + '-01T00:00:00');
+  const to = new Date(from.getFullYear(), from.getMonth() + 1, 1);
+  const [p, s, ps, c, t] = await Promise.all([
+    sb.from('profiles').select('*'),
+    sb.from('shares').select('*').gte('shared_at', from.toISOString()).lt('shared_at', to.toISOString())
+      .order('shared_at', { ascending: false }).limit(5000),
+    sb.from('posts').select('*').order('created_at', { ascending: false }).limit(500),
+    sb.from('captions').select('*').order('id'),
+    sb.from('settings').select('value').eq('key', 'monthly_target').maybeSingle(),
+  ]);
+  const e = p.error || s.error || ps.error;
+  if (e) return toast(/schema cache|does not exist/.test(e.message) ? 'Database chưa đủ bảng (chạy setup2.sql).' : e.message);
+  profiles = p.data; shares = s.data; posts = ps.data;
+  target = +(t.data?.value || 11);
+  $('target').value = target; $('tgtLbl').textContent = target;
+  $('caps').value = (c.data || []).map((x) => x.text).join('\n');
+  render(); renderPosts();
+}
+
+function render() {
+  const q = $('search').value.trim().toLowerCase();
+  const today = ymd(new Date());
+  const byUser = {};
+  for (const sh of shares) (byUser[sh.user_id] ||= []).push(sh);
+
+  rowsCache = profiles.map((p) => {
+    const list = byUser[p.id] || [];
+    return { ...p, list, count: list.length, last: list[0]?.shared_at || null,
+      today: list.filter((x) => ymd(x.shared_at) === today).length };
+  }).filter((r) => !q || (r.name || '').toLowerCase().includes(q) || (r.email || '').toLowerCase().includes(q));
+  rowsCache.sort((a, b) => { const va = a[sortKey] ?? '', vb = b[sortKey] ?? ''; return (va > vb ? 1 : va < vb ? -1 : 0) * sortDir; });
+
+  $('sUsers').textContent = profiles.length;
+  $('sShares').textContent = shares.length;
+  $('sDone').textContent = `${rowsCache.filter((r) => r.count >= target).length}/${rowsCache.length}`;
+  $('sToday').textContent = shares.filter((x) => ymd(x.shared_at) === today).length;
+
+  const th = (k, t) => `<th class="sort" onclick="sortBy('${k}')">${t}${sortKey === k ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
+  $('tbl').innerHTML = rowsCache.length ? `<tr>${th('name', 'Người dùng')}${th('count', 'Đã share')}<th>Tiến độ</th>${th('today', 'Hôm nay')}${th('last', 'Lần cuối')}<th></th></tr>` +
+    rowsCache.map((r) => {
+      const pct = Math.min(100, Math.round(r.count / target * 100));
+      const cls = r.count >= target ? 'ok' : pct >= 50 ? 'mid' : 'low';
+      const color = { ok: 'var(--green)', mid: 'var(--orange)', low: 'var(--red)' }[cls];
+      const detail = open.has(r.id) ? `<tr class="detail"><td colspan="6">${r.list.length ? r.list.map((x) =>
+        `<div style="padding:4px 0">🕒 ${new Date(x.shared_at).toLocaleString('vi-VN')}
+          <span class="pill ${x.source === 'web' ? 'mid' : 'ok'}">${x.source === 'web' ? 'Web' : 'Bot'}</span>
+          <a href="${esc(x.post_url)}" target="_blank">${esc(short(x.post_url).slice(0, 70))}</a>
+          ${x.caption ? `<span class="lbl">“${esc(x.caption)}”</span>` : ''}</div>`).join('') : '<span class="lbl">Chưa share bài nào trong tháng.</span>'}</td></tr>` : '';
+      return `<tr>
+        <td><b>${esc(r.name || '(chưa đặt tên)')}</b><div class="lbl">${esc(r.email)}</div></td>
+        <td><span class="pill ${cls}">${r.count}/${target}</span></td>
+        <td><div class="ubar"><div style="width:${pct}%;background:${color}"></div></div></td>
+        <td>${r.today}</td>
+        <td class="lbl">${r.last ? new Date(r.last).toLocaleString('vi-VN') : '—'}</td>
+        <td><button class="sm" onclick="toggle('${r.id}')">${open.has(r.id) ? 'Ẩn' : 'Xem bài'}</button></td>
+      </tr>${detail}`;
+    }).join('') : '<tr><td class="empty">Chưa có ai đăng nhập.</td></tr>';
+}
+function toggle(id) { open.has(id) ? open.delete(id) : open.add(id); render(); }
+function sortBy(k) { sortDir = sortKey === k ? -sortDir : (k === 'name' ? 1 : -1); sortKey = k; render(); }
+
+function renderPosts() {
+  const counts = {};
+  for (const s of shares) counts[s.post_url] = (counts[s.post_url] || 0) + 1;
+  $('postCount').textContent = `(${posts.filter((p) => !p.hidden).length} đang hiện / ${posts.length})`;
+  $('postTbl').innerHTML = posts.length ? '<tr><th>Bài</th><th>Lượt share tháng này</th><th>Trạng thái</th><th></th></tr>' + posts.map((p) => `<tr>
+      <td><a href="${esc(p.url)}" target="_blank">${esc(short(p.url).slice(0, 70))}</a><div class="lbl">${new Date(p.created_at).toLocaleString('vi-VN')}</div></td>
+      <td>${counts[p.url] || 0}</td>
+      <td>${p.hidden ? '<span class="pill low">Đang ẩn</span>' : '<span class="pill ok">Đang hiện</span>'}</td>
+      <td style="white-space:nowrap"><button class="sm" onclick="setHidden(${p.id}, ${!p.hidden})">${p.hidden ? 'Hiện' : 'Ẩn'}</button>
+        <button class="sm danger" onclick="delPost(${p.id})">Xóa</button></td></tr>`).join('')
+    : '<tr><td class="empty">Chưa có bài. Dán link ở trên hoặc chạy bot quét page.</td></tr>';
+}
+
+function normalize(u) {
+  try {
+    const x = new URL(u.trim());
+    if (!/facebook\.com$/.test(x.hostname.replace(/^(www|m|web)\./, ''))) return null;
+    if (/permalink\.php|story\.php/.test(x.pathname)) return `https://www.facebook.com${x.pathname}?story_fbid=${x.searchParams.get('story_fbid')}&id=${x.searchParams.get('id')}`;
+    return `https://www.facebook.com${x.pathname}`.replace(/\/$/, '');
+  } catch { return null; }
+}
+async function addPosts() {
+  const urls = [...new Set($('newPosts').value.split('\n').map(normalize).filter(Boolean))];
+  if (!urls.length) return toast('Không có link Facebook hợp lệ');
+  const { error } = await sb.from('posts').upsert(urls.map((url) => ({ url })), { onConflict: 'url', ignoreDuplicates: true });
+  if (error) return toast(error.message);
+  $('newPosts').value = '';
+  toast(`Đã thêm ${urls.length} bài`);
+  load();
+}
+async function setHidden(id, hidden) { await sb.from('posts').update({ hidden }).eq('id', id); load(); }
+async function delPost(id) {
+  if (!confirm('Xóa bài này khỏi danh sách? (Lịch sử share vẫn giữ)')) return;
+  await sb.from('posts').delete().eq('id', id); load();
+}
+
+async function saveCaptions() {
+  const lines = $('caps').value.split('\n').map((s) => s.trim()).filter(Boolean);
+  const del = await sb.from('captions').delete().gt('id', 0);
+  if (del.error) return toast(del.error.message);
+  if (lines.length) {
+    const { error } = await sb.from('captions').insert(lines.map((text) => ({ text })));
+    if (error) return toast(error.message);
+  }
+  toast(`Đã lưu ${lines.length} caption`);
+}
+async function saveTarget() {
+  const v = Math.max(1, +$('target').value || 11);
+  const { error } = await sb.from('settings').upsert({ key: 'monthly_target', value: String(v) });
+  if (error) return toast(error.message);
+  toast('Đã lưu chỉ tiêu'); load();
+}
+
+function exportCsv() {
+  const lines = [['Ho ten', 'Email', 'Thoi gian', 'Cach', 'Link bai', 'Caption']];
+  for (const r of rowsCache) for (const x of r.list)
+    lines.push([r.name, r.email, new Date(x.shared_at).toLocaleString('vi-VN'), x.source, x.post_url, x.caption || '']);
+  const csv = '﻿' + lines.map((l) => l.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `share-${$('month').value}.csv`;
+  a.click();
+}
+
+$('month').onchange = load;
+$('search').oninput = render;
+boot();
+</script>
+</body>
+</html>
