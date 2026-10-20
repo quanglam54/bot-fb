@@ -4,6 +4,7 @@
   --red: #d93636; --red-soft: #fdeaea; --orange: #e08a00; --orange-soft: #fff3dc;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; font: 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
 header { background: var(--card); border-bottom: 1px solid var(--line); padding: 12px 24px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: 0; z-index: 3; }
 header h1 { font-size: 18px; margin: 0; }
