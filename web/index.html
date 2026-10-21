@@ -93,6 +93,15 @@
             <option value="1">1 bài/ngày</option><option value="2">2 bài/ngày</option><option value="3">3 bài/ngày</option>
           </select>
         </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+          <span class="lbl">Trước khi share:</span>
+          <select id="extReact" onchange="saveExt()">
+            <option value="love">❤️ Thả tim</option><option value="like">👍 Thích</option><option value="none">Không bày tỏ cảm xúc</option>
+          </select>
+          <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-weight:600">
+            <input type="checkbox" id="extComment" onchange="saveExt()"> 💬 Tự bình luận</label>
+          <span class="lbl">(câu ngẫu nhiên do admin soạn)</span>
+        </div>
         <div class="lbl" id="extStatus"></div>
 
         <div style="margin-top:14px"><b>Page lấy bài</b></div>
@@ -337,6 +346,7 @@ function renderExt() {
   const { settings: cfg, state: st } = extState;
   if (document.activeElement?.closest?.('#extReady') == null) {
     $('extAuto').checked = cfg.auto; $('extHour').value = cfg.hour; $('extPerDay').value = cfg.perDay;
+    $('extReact').value = cfg.react || 'love'; $('extComment').checked = !!cfg.comment;
   }
   const key = JSON.stringify(cfg.pages);
   if (key !== extPagesKey) {
@@ -367,7 +377,8 @@ async function connectExt() {
 }
 async function saveExt(patch = {}) {
   try {
-    await ext('saveSettings', { auto: $('extAuto').checked, hour: +$('extHour').value, perDay: +$('extPerDay').value, ...patch });
+    await ext('saveSettings', { auto: $('extAuto').checked, hour: +$('extHour').value, perDay: +$('extPerDay').value,
+      react: $('extReact').value, comment: $('extComment').checked, ...patch });
     toast('Đã lưu'); document.activeElement?.blur?.(); refreshExt();
   } catch (e) { toast(e.message); }
 }

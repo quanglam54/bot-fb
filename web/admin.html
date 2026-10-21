@@ -87,6 +87,12 @@
         <button class="primary" style="margin-top:8px" onclick="saveCaptions()">Lưu caption</button>
       </div>
       <div class="card half">
+        <h2>🗨️ Bình luận gợi ý (mỗi dòng 1 câu)</h2>
+        <div class="lbl" style="margin-bottom:8px">Dùng cho người bật "Tự bình luận". Soạn <b>càng nhiều câu khác nhau càng tốt</b> — nhiều nick bình luận giống hệt nhau dễ bị Facebook coi là spam.</div>
+        <textarea id="cmts" style="min-height:220px" placeholder="Chúc mừng Zeno! 🎉&#10;Tự hào quá team ơi 💙"></textarea>
+        <button class="primary" style="margin-top:8px" onclick="saveComments()">Lưu bình luận</button>
+      </div>
+      <div class="card half">
         <h2>🎯 Chỉ tiêu</h2>
         <div class="toolbar"><span>Số bài mỗi tháng</span><input id="target" type="number" min="1" style="width:90px">
           <button class="primary" onclick="saveTarget()">Lưu</button></div>
@@ -144,14 +150,16 @@ async function boot() {
 async function load() {
   const from = new Date($('month').value + '-01T00:00:00');
   const to = new Date(from.getFullYear(), from.getMonth() + 1, 1);
-  const [p, s, ps, c, t] = await Promise.all([
+  const [p, s, ps, c, t, cm] = await Promise.all([
     sb.from('profiles').select('*'),
     sb.from('shares').select('*').gte('shared_at', from.toISOString()).lt('shared_at', to.toISOString())
       .order('shared_at', { ascending: false }).limit(5000),
     sb.from('posts').select('*').order('created_at', { ascending: false }).limit(500),
     sb.from('captions').select('*').order('id'),
     sb.from('settings').select('value').eq('key', 'monthly_target').maybeSingle(),
+    sb.from('settings').select('value').eq('key', 'comments').maybeSingle(),
   ]);
+  $('cmts').value = cm.data?.value || '';
   const e = p.error || s.error || ps.error;
   if (e) return toast(/schema cache|does not exist/.test(e.message) ? 'Database chưa đủ bảng (chạy setup2.sql).' : e.message);
   profiles = p.data; shares = s.data; posts = ps.data;
@@ -248,6 +256,12 @@ async function saveCaptions() {
     if (error) return toast(error.message);
   }
   toast(`Đã lưu ${lines.length} caption`);
+}
+async function saveComments() {
+  const lines = $('cmts').value.split('\n').map((s) => s.trim()).filter(Boolean);
+  const { error } = await sb.from('settings').upsert({ key: 'comments', value: lines.join('\n') });
+  if (error) return toast(error.message);
+  toast(`Đã lưu ${lines.length} bình luận`);
 }
 async function saveTarget() {
   const v = Math.max(1, +$('target').value || 11);
