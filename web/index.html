@@ -137,7 +137,7 @@
       </ol>
     </div>
 
-    <div class="card wide">
+    <div class="card wide" id="postsCard">
       <h2>📰 Bài của page
         <span class="spacer"></span>
         <div class="tabs">
@@ -179,6 +179,7 @@ const short = (u) => u.replace('https://www.facebook.com/', '');
 function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); }
 
 let user = null, posts = [], myShares = [], captions = [], target = 11, filter = 'todo', pending = null, previews = new Set();
+let freshIds = new Set(), checkBefore = null; // bài mới tìm được sau khi bấm "Kiểm tra bài mới ngay"
 
 // ---------- Đăng nhập ----------
 let authMode = 'login';
@@ -264,6 +265,7 @@ function render(from = (() => { const d = new Date(); d.setDate(1); d.setHours(0
         <a href="${esc(p.url)}" target="_blank">${esc(short(p.url).slice(0, 60))}…</a>
         <div class="lbl">Thêm lúc ${new Date(p.created_at).toLocaleString('vi-VN')}</div>
       </div>
+      ${freshIds.has(p.id) ? '<span class="pill low">🆕 Mới</span>' : ''}
       ${done ? '<span class="pill ok">Đã share</span>' : '<span class="pill mid">Chưa share</span>'}
       <button class="sm" onclick="togglePreview(${p.id})">${previews.has(p.id) ? 'Ẩn' : 'Xem trước'}</button>
       ${extReady() && !done ? `<button class="primary" onclick="runExt('${esc(p.url)}')">🤖 Tự share</button>` : ''}
@@ -420,8 +422,27 @@ async function runLink() {
   $('extLink').value = '';
 }
 async function checkNew() {
-  try { await ext('checkNewNow'); toast('Bot đang xem page tìm bài mới…'); refreshExt(); }
-  catch (e) { toast(e.message); }
+  try {
+    checkBefore = new Set(posts.map((p) => p.id));
+    await ext('checkNewNow');
+    toast('Bot đang xem page tìm bài mới…');
+    refreshExt();
+  } catch (e) { checkBefore = null; toast(e.message); }
+}
+
+// Kiểm tra xong: tải lại danh sách, đánh dấu bài mới, kéo xuống phần "Bài của page"
+async function afterCheck() {
+  await load();
+  const fresh = posts.filter((p) => !checkBefore.has(p.id));
+  checkBefore = null;
+  freshIds = new Set(fresh.map((p) => p.id));
+  if (fresh.length) {
+    filter = 'all';
+    document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x.dataset.f === 'all'));
+  }
+  render();
+  toast(fresh.length ? `🆕 Tìm thấy ${fresh.length} bài mới` : 'Page chưa có bài mới');
+  $('postsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 async function runExt(url) {
   try { await ext('runNow', url ? { url } : {}); toast('Bot bắt đầu chạy — cửa sổ Facebook sẽ bật lên'); refreshExt(); }
@@ -432,7 +453,7 @@ let wasRunning = false;
 setInterval(async () => {
   await refreshExt();
   const r = !!extState?.state?.running;
-  if (wasRunning && !r) load();
+  if (wasRunning && !r) { if (checkBefore) afterCheck(); else load(); }
   wasRunning = r;
 }, 2500);
 
