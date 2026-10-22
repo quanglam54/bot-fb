@@ -83,15 +83,21 @@
 
       <div id="extReady" hidden>
         <div id="extWarn"></div>
+        <div id="extOld"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <input id="extLink" placeholder="Dán link bài viết Facebook cần share…" style="flex:1;min-width:220px" onkeydown="if(event.key==='Enter')runLink()">
+          <button class="primary" id="extLinkBtn" onclick="runLink()">🤖 Tim + bình luận + share bài này</button>
+        </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-          <button class="primary" id="extRun" onclick="runExt()">🤖 Tự share 1 bài ngay</button>
+          <button id="extRun" onclick="runExt()">🤖 Tự chọn & share 1 bài ngay</button>
           <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-weight:600">
-            <input type="checkbox" id="extAuto" onchange="saveExt()"> Tự share mỗi ngày</label>
-          <span class="lbl">từ</span>
-          <select id="extHour" onchange="saveExt()"></select>
-          <select id="extPerDay" onchange="saveExt()">
-            <option value="1">1 bài/ngày</option><option value="2">2 bài/ngày</option><option value="3">3 bài/ngày</option>
+            <input type="checkbox" id="extAuto" onchange="saveExt()"> Tự share định kỳ</label>
+          <select id="extEvery" onchange="saveExt()">
+            <option value="1">1 ngày 1 bài</option><option value="2">2 ngày 1 bài</option><option value="3">3 ngày 1 bài</option>
+            <option value="5">5 ngày 1 bài</option><option value="7">7 ngày 1 bài</option>
           </select>
+          <span class="lbl">lúc khoảng</span>
+          <select id="extHour" onchange="saveExt()"></select>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           <span class="lbl">Trước khi share:</span>
@@ -100,8 +106,11 @@
           </select>
           <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-weight:600">
             <input type="checkbox" id="extComment" onchange="saveExt()"> 💬 Tự bình luận</label>
-          <span class="lbl">(câu ngẫu nhiên do admin soạn)</span>
+          <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-weight:600">
+            <input type="checkbox" id="extAutoNew" onchange="saveExt()"> ⚡ Tự share bài mới</label>
+          <button class="sm" id="extCheckNew" onclick="checkNew()">🔄 Kiểm tra bài mới ngay</button>
         </div>
+        <div class="lbl" style="margin:-4px 0 12px">⚡ <b>Tự share bài mới</b>: mỗi 1 tiếng (7h–23h) bot xem page, thấy bài mới thì khoảng 1 tiếng sau tự thả tim, bình luận (nếu bật) và share. Tối đa 3 bài mới/ngày.</div>
         <div class="lbl" id="extStatus"></div>
 
         <div style="margin-top:14px"><b>Page lấy bài</b></div>
@@ -345,8 +354,8 @@ function renderExt() {
 
   const { settings: cfg, state: st } = extState;
   if (document.activeElement?.closest?.('#extReady') == null) {
-    $('extAuto').checked = cfg.auto; $('extHour').value = cfg.hour; $('extPerDay').value = cfg.perDay;
-    $('extReact').value = cfg.react || 'love'; $('extComment').checked = !!cfg.comment;
+    $('extAuto').checked = cfg.auto; $('extHour').value = cfg.hour; $('extEvery').value = cfg.everyDays || 3;
+    $('extReact').value = cfg.react || 'love'; $('extComment').checked = !!cfg.comment; $('extAutoNew').checked = !!cfg.autoNew;
   }
   const key = JSON.stringify(cfg.pages);
   if (key !== extPagesKey) {
@@ -356,10 +365,15 @@ function renderExt() {
       : '<div class="lbl">Chưa có page — bot sẽ chỉ share các bài trong danh sách bên dưới.</div>';
   }
   const last = st.lastResult;
-  $('extRun').disabled = !!st.running;
-  $('extRun').textContent = st.running ? '⏳ Bot đang chạy…' : '🤖 Tự share 1 bài ngay';
+  const oldExt = verLt(extState.version, '1.2.0');
+  $('extOld').innerHTML = oldExt ? `<div class="card" style="background:var(--orange-soft);border-color:transparent;color:var(--orange);margin-bottom:12px">
+    ⚠️ Extension đang là bản ${esc(extState.version)} — tải bản mới (nút bên dưới không chạy với bản cũ):
+    <a href="zeno-share-extension.zip" download><b>Tải extension mới</b></a>, giải nén đè thư mục cũ rồi bấm ↻ trong chrome://extensions.</div>` : '';
+  for (const id of ['extRun', 'extLinkBtn', 'extCheckNew']) $(id).disabled = !!st.running || (oldExt && id !== 'extRun');
+  $('extRun').textContent = st.running ? '⏳ Bot đang chạy…' : '🤖 Tự chọn & share 1 bài ngay';
   $('extStatus').innerHTML = [
-    cfg.auto ? `✅ Đang bật tự share <b>${cfg.perDay} bài/ngày</b>, từ khoảng <b>${cfg.hour}:00</b>.` : 'Tự share mỗi ngày đang <b>tắt</b>.',
+    cfg.auto ? `✅ Tự share định kỳ: <b>${cfg.everyDays || 3} ngày 1 bài</b>, lúc khoảng <b>${cfg.hour}:00</b>.` : 'Tự share định kỳ đang <b>tắt</b>.',
+    cfg.autoNew ? `⚡ Đang bật tự share bài mới${st.lastNewScan ? ` (lần xem page gần nhất: ${new Date(st.lastNewScan).toLocaleTimeString('vi-VN')})` : ''}.` : '',
     last ? `Lần gần nhất (${new Date(last.at).toLocaleString('vi-VN')}): ${last.ok ? (last.nothing ? 'không còn bài mới' : '<b style="color:var(--green)">share thành công</b>') : `<b style="color:var(--red)">${esc(last.error)}</b>`}` : '',
   ].filter(Boolean).join('<br>');
   $('extWarn').innerHTML = st.needFb ? `<div class="card" style="background:var(--red-soft);border-color:transparent;color:var(--red);margin-bottom:12px">
@@ -377,8 +391,8 @@ async function connectExt() {
 }
 async function saveExt(patch = {}) {
   try {
-    await ext('saveSettings', { auto: $('extAuto').checked, hour: +$('extHour').value, perDay: +$('extPerDay').value,
-      react: $('extReact').value, comment: $('extComment').checked, ...patch });
+    await ext('saveSettings', { auto: $('extAuto').checked, hour: +$('extHour').value, everyDays: +$('extEvery').value,
+      react: $('extReact').value, comment: $('extComment').checked, autoNew: $('extAutoNew').checked, ...patch });
     toast('Đã lưu'); document.activeElement?.blur?.(); refreshExt();
   } catch (e) { toast(e.message); }
 }
@@ -394,6 +408,21 @@ function addExtPage() {
   saveExt({ pages: [...pages, v] });
 }
 function removeExtPage(i) { saveExt({ pages: extState.settings.pages.filter((_, k) => k !== i) }); }
+const verLt = (a, b) => {
+  const pa = String(a || '0').split('.').map(Number), pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== pb[i]) return (pa[i] || 0) < pb[i];
+  return false;
+};
+async function runLink() {
+  const v = $('extLink').value.trim();
+  if (!/facebook\.com\/.+/.test(v)) return toast('Dán link bài viết facebook.com');
+  await runExt(v);
+  $('extLink').value = '';
+}
+async function checkNew() {
+  try { await ext('checkNewNow'); toast('Bot đang xem page tìm bài mới…'); refreshExt(); }
+  catch (e) { toast(e.message); }
+}
 async function runExt(url) {
   try { await ext('runNow', url ? { url } : {}); toast('Bot bắt đầu chạy — cửa sổ Facebook sẽ bật lên'); refreshExt(); }
   catch (e) { toast(e.message); }
