@@ -142,7 +142,6 @@
         <span class="spacer"></span>
         <div class="tabs">
           <button class="active" data-f="todo">Chưa share</button>
-          <button data-f="all">Tất cả</button>
           <button data-f="done">Đã share</button>
         </div>
       </h2>
@@ -257,7 +256,8 @@ function render(from = (() => { const d = new Date(); d.setDate(1); d.setHours(0
   $('tCount').textContent = month.filter((x) => ymd(x.shared_at) === today).length;
   $('pCount').textContent = posts.filter((p) => !sharedUrls.has(p.url)).length;
 
-  const list = posts.filter((p) => filter === 'all' || (filter === 'done') === sharedUrls.has(p.url));
+  // 2 tab: "Chưa share" và "Đã share" — share xong là bài chuyển hẳn sang tab "Đã share"
+  const list = posts.filter((p) => (filter === 'done') === sharedUrls.has(p.url));
   $('posts').innerHTML = list.length ? list.map((p) => {
     const done = sharedUrls.has(p.url);
     return `<div class="post">
@@ -436,10 +436,9 @@ async function afterCheck() {
   const fresh = posts.filter((p) => !checkBefore.has(p.id));
   checkBefore = null;
   freshIds = new Set(fresh.map((p) => p.id));
-  if (fresh.length) {
-    filter = 'all';
-    document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x.dataset.f === 'all'));
-  }
+  // Giữ ở tab "Chưa share" để không lẫn bài đã share
+  filter = 'todo';
+  document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x.dataset.f === 'todo'));
   render();
   toast(fresh.length ? `🆕 Tìm thấy ${fresh.length} bài mới` : 'Page chưa có bài mới');
   $('postsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
