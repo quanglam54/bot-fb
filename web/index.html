@@ -145,6 +145,16 @@
           <button data-f="done">Đã share</button>
         </div>
       </h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <input id="addLink" placeholder="Dán link bài của page để thêm vào danh sách cho cả team…" style="flex:1;min-width:220px" onkeydown="if(event.key==='Enter')addLinkClick()">
+        <button onclick="addLinkClick()">➕ Thêm cho cả team</button>
+      </div>
+      <div id="bulkBar" hidden style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;padding:10px 12px;background:var(--blue-soft);border-radius:8px">
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-weight:600">
+          <input type="checkbox" id="bulkAll" onchange="bulkPickTop(this.checked)"> Chọn 5 bài đầu</label>
+        <button class="primary" id="bulkBtn" onclick="bulkShare()" disabled>🤖 Share các bài đã chọn (0)</button>
+        <span class="lbl">Bot share lần lượt, mỗi bài cách nhau 2–4 phút. Tối đa 5 bài/lượt.</span>
+      </div>
       <div id="posts"></div>
     </div>
 
@@ -179,6 +189,7 @@ function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('sh
 
 let allPosts = [];
 let user = null, posts = [], myShares = [], captions = [], target = 11, filter = 'todo', pending = null, previews = new Set();
+let picked = new Set(); // bài được tick để share hàng loạt
 let freshIds = new Set(), checkBefore = null; // bài mới tìm được sau khi bấm "Kiểm tra bài mới ngay"
 
 // ---------- Đăng nhập ----------
@@ -267,14 +278,21 @@ function render(from = (() => { const d = new Date(); d.setDate(1); d.setHours(0
 
   // 2 tab: "Chưa share" và "Đã share" — share xong là bài chuyển hẳn sang tab "Đã share"
   const list = posts.filter((p) => (filter === 'done') === isShared(p));
+  // Share hàng loạt: chỉ ở tab "Chưa share" và khi extension >= 1.4.0 đã kết nối
+  const bulkOk = filter === 'todo' && extReady() && !verLt(extState.version, '1.4.0') && !(extState.queue && extState.queue.active);
+  for (const id of [...picked]) if (!list.some((p) => p.id === id)) picked.delete(id);
+  $('bulkBar').hidden = !bulkOk || !list.length;
+  $('bulkBtn').disabled = !picked.size;
+  $('bulkBtn').textContent = `🤖 Share các bài đã chọn (${picked.size})`;
   $('posts').innerHTML = list.length ? list.map((p) => {
     const done = isShared(p);
-    return `<div class="post">
+    return `<div class="post" data-id="${p.id}">
+      ${bulkOk ? `<input type="checkbox" ${picked.has(p.id) ? 'checked' : ''} onchange="togglePick(${p.id}, this)" style="width:18px;height:18px;cursor:pointer">` : ''}
       <div class="info">
         <a href="${esc(p.url)}" target="_blank">${esc(short(p.url).slice(0, 60))}…</a>
         <div class="lbl">Thêm lúc ${new Date(p.created_at).toLocaleString('vi-VN')}</div>
       </div>
-      ${freshIds.has(p.id) ? '<span class="pill low">🆕 Mới</span>' : ''}
+      ${freshIds.has(p.id) || Date.now() - new Date(p.created_at) < 24 * 3600e3 ? '<span class="pill low">🆕 Mới</span>' : ''}
       ${done ? '<span class="pill ok">Đã share</span>' : '<span class="pill mid">Chưa share</span>'}
       <button class="sm" onclick="togglePreview(${p.id})">${previews.has(p.id) ? 'Ẩn' : 'Xem trước'}</button>
       ${extReady() && !done ? `<button class="primary" onclick="runExt('${esc(p.url)}')">🤖 Tự share</button>` : ''}
@@ -350,9 +368,13 @@ function copyText(t) { navigator.clipboard.writeText(t).then(() => toast('Đã c
 async function refreshExt() {
   if (!user || $('appView').hidden) return;
   const before = extReady();
+  const qBefore = !!(extState && extState.queue && extState.queue.active);
+  const doneBefore = extState && extState.queue ? extState.queue.done.length : 0;
   if (hasExt()) { try { extState = await ext('getState'); } catch { extState = null; } }
   renderExt();
-  if (before !== extReady()) render();
+  const q = extState && extState.queue;
+  if (before !== extReady() || qBefore !== !!(q && q.active)) render();
+  if (q && q.done.length !== doneBefore) load(); // share hàng loạt xong thêm 1 bài -> cập nhật danh sách
 }
 
 function renderExt() {
@@ -387,6 +409,15 @@ function renderExt() {
   $('extRun').textContent = st.running ? '⏳ Bot đang chạy…' : '🤖 Tự chọn & share 1 bài ngay';
   $('extStatus').innerHTML = [
     cfg.auto ? `✅ Tự share định kỳ: <b>${cfg.everyDays || 3} ngày 1 bài</b>, lúc khoảng <b>${cfg.hour}:00</b>.` : 'Tự share định kỳ đang <b>tắt</b>.',
+    (() => {
+      const q = extState.queue;
+      if (!q || (!q.active && !(q.finishedAt && Date.now() - q.finishedAt < 3600e3))) return '';
+      const okN = q.done.filter((x) => x.ok && !x.skipped).length;
+      if (!q.active) return `📦 Share hàng loạt ${q.cancelled ? 'đã hủy' : q.stopped ? '<b style="color:var(--red)">đã dừng vì lỗi nick Facebook</b>' : 'xong'}: <b>${okN}/${q.total}</b> bài.`;
+      return `📦 <b>Đang share hàng loạt: ${q.done.length}/${q.total}</b>` +
+        (q.nextAt ? ` — bài tiếp theo lúc <b>${new Date(q.nextAt).toLocaleTimeString('vi-VN')}</b>` : ' — đang share…') +
+        ` <button class="sm danger" onclick="cancelQueue()">Hủy</button>`;
+    })(),
     cfg.autoNew ? `⚡ Đang bật tự share bài mới${st.lastNewScan ? ` (lần xem page gần nhất: ${new Date(st.lastNewScan).toLocaleTimeString('vi-VN')})` : ''}.` : '',
     last ? `Lần gần nhất (${new Date(last.at).toLocaleString('vi-VN')}): ${last.ok ? (last.nothing ? 'không còn bài mới' : '<b style="color:var(--green)">share thành công</b>') : `<b style="color:var(--red)">${esc(last.error)}</b>`}` : '',
   ].filter(Boolean).join('<br>');
@@ -427,11 +458,68 @@ const verLt = (a, b) => {
   for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== pb[i]) return (pa[i] || 0) < pb[i];
   return false;
 };
+// Chuẩn hóa link bài FB (giống extension): bỏ tham số rác, m.facebook -> www
+function normalizeFb(href) {
+  try {
+    const u = new URL(href.trim());
+    if (!/(^|\.)facebook\.com$/.test(u.hostname)) return null;
+    if (/permalink\.php|story\.php/.test(u.pathname)) return `https://www.facebook.com${u.pathname}?story_fbid=${u.searchParams.get('story_fbid')}&id=${u.searchParams.get('id')}`;
+    return `https://www.facebook.com${u.pathname}`.replace(/\/$/, '');
+  } catch { return null; }
+}
+
+// Thêm bài vào danh sách chung -> cả team đều thấy và có nút share
+async function addSharedLink(v) {
+  const url = normalizeFb(v || '');
+  if (!url || !/\/(posts|reel|videos)\/|permalink\.php|story\.php/.test(url)) { toast('Dán link bài viết facebook.com'); return null; }
+  if (allPosts.some((p) => p.url === url)) return url; // đã có trong danh sách
+  const { error } = await sb.from('posts').upsert({ url }, { onConflict: 'url', ignoreDuplicates: true });
+  if (error) {
+    toast(/row-level security/i.test(error.message) ? 'Chỉ thêm được bài của page Zeno (hoặc reel).' : error.message);
+    return null;
+  }
+  await load();
+  const p = allPosts.find((x) => x.url === url);
+  if (p) { freshIds.add(p.id); render(); }
+  return url;
+}
+async function addLinkClick() {
+  const url = await addSharedLink($('addLink').value);
+  if (url) { $('addLink').value = ''; toast('🆕 Đã thêm bài cho cả team'); }
+}
+
 async function runLink() {
   const v = $('extLink').value.trim();
   if (!/facebook\.com\/.+/.test(v)) return toast('Dán link bài viết facebook.com');
+  await addSharedLink(v); // thêm vào danh sách chung (nếu là bài page Zeno) để cả team cùng share
   await runExt(v);
   $('extLink').value = '';
+}
+
+// ---------- Share hàng loạt ----------
+function togglePick(id, el) {
+  if (el.checked && picked.size >= 5) { el.checked = false; return toast('Tối đa 5 bài mỗi lượt'); }
+  el.checked ? picked.add(id) : picked.delete(id);
+  $('bulkBtn').disabled = !picked.size;
+  $('bulkBtn').textContent = `🤖 Share các bài đã chọn (${picked.size})`;
+}
+function bulkPickTop(on) {
+  picked = new Set();
+  if (on) $('posts').querySelectorAll('.post').forEach((row, i) => { if (i < 5) picked.add(+row.dataset.id); });
+  render();
+}
+async function bulkShare() {
+  const urls = posts.filter((p) => picked.has(p.id)).map((p) => p.url);
+  if (!urls.length) return;
+  try {
+    await ext('queueShare', { urls });
+    picked = new Set(); $('bulkAll').checked = false;
+    toast(`📦 Bắt đầu share ${urls.length} bài — mỗi bài cách nhau 2–4 phút`);
+    refreshExt();
+  } catch (e) { toast(e.message); }
+}
+async function cancelQueue() {
+  try { await ext('cancelQueue'); toast('Đã hủy share hàng loạt'); refreshExt(); } catch (e) { toast(e.message); }
 }
 async function checkNew() {
   try {
@@ -459,6 +547,10 @@ async function runExt(url) {
   try { await ext('runNow', url ? { url } : {}); toast('Bot bắt đầu chạy — cửa sổ Facebook sẽ bật lên'); refreshExt(); }
   catch (e) { toast(e.message); }
 }
+// Tự cập nhật danh sách mỗi 2 phút (thấy bài người khác vừa dán) và khi quay lại tab
+setInterval(() => { if (user && !document.hidden && $('confirm').hidden) load(); }, 120000);
+document.addEventListener('visibilitychange', () => { if (user && !document.hidden && $('confirm').hidden) load(); });
+
 // Bot chạy xong -> tải lại tiến độ
 let wasRunning = false;
 setInterval(async () => {
