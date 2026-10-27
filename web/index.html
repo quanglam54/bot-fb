@@ -177,6 +177,7 @@ const ymd = (d) => new Date(d).toLocaleDateString('sv-SE');
 const short = (u) => u.replace('https://www.facebook.com/', '');
 function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); }
 
+let allPosts = [];
 let user = null, posts = [], myShares = [], captions = [], target = 11, filter = 'todo', pending = null, previews = new Set();
 let freshIds = new Set(), checkBefore = null; // bài mới tìm được sau khi bấm "Kiểm tra bài mới ngay"
 
@@ -242,24 +243,32 @@ async function load() {
   ]);
   const e = p.error || s.error;
   if (e) return toast(/schema cache|does not exist/.test(e.message) ? 'Database chưa đủ bảng (chạy setup2.sql).' : e.message);
-  posts = p.data; myShares = s.data; captions = (c.data || []).map((x) => x.text);
+  // FB hay đổi link (pfbid) của cùng 1 bài -> gộp các bài trùng dấu vân tay (fp), giữ link mới nhất
+  allPosts = p.data;
+  const seenFp = new Set();
+  posts = allPosts.filter((x) => !x.fp || (!seenFp.has(x.fp) && seenFp.add(x.fp)));
+  myShares = s.data; captions = (c.data || []).map((x) => x.text);
   target = +(t.data?.value || 11);
   render(from);
 }
 
 function render(from = (() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; })()) {
+  // Đã share = trùng link HOẶC trùng dấu vân tay với bài đã share (kể cả share dưới link cũ)
   const sharedUrls = new Set(myShares.map((x) => x.post_url));
+  const sharedFps = new Set(myShares.map((x) => x.post_fp).filter(Boolean));
+  for (const x of allPosts) if (x.fp && sharedUrls.has(x.url)) sharedFps.add(x.fp);
+  const isShared = (p) => sharedUrls.has(p.url) || (!!p.fp && sharedFps.has(p.fp));
   const month = myShares.filter((x) => new Date(x.shared_at) >= from);
   const today = ymd(new Date());
   $('mCount').textContent = month.length; $('target').textContent = target;
   $('mBar').style.width = Math.min(100, month.length / target * 100) + '%';
   $('tCount').textContent = month.filter((x) => ymd(x.shared_at) === today).length;
-  $('pCount').textContent = posts.filter((p) => !sharedUrls.has(p.url)).length;
+  $('pCount').textContent = posts.filter((p) => !isShared(p)).length;
 
   // 2 tab: "Chưa share" và "Đã share" — share xong là bài chuyển hẳn sang tab "Đã share"
-  const list = posts.filter((p) => (filter === 'done') === sharedUrls.has(p.url));
+  const list = posts.filter((p) => (filter === 'done') === isShared(p));
   $('posts').innerHTML = list.length ? list.map((p) => {
-    const done = sharedUrls.has(p.url);
+    const done = isShared(p);
     return `<div class="post">
       <div class="info">
         <a href="${esc(p.url)}" target="_blank">${esc(short(p.url).slice(0, 60))}…</a>
@@ -305,7 +314,10 @@ function closeConfirm() { $('confirm').hidden = true; pending = null; }
 
 async function markShared() {
   const { post, caption } = pending;
-  const { error } = await sb.from('shares').insert({ user_id: user.id, post_url: post.url, caption, source: 'web' });
+  const row = { user_id: user.id, post_url: post.url, caption, source: 'web' };
+  if (post.fp) row.post_fp = post.fp;
+  let { error } = await sb.from('shares').insert(row);
+  if (error && /post_fp/.test(error.message)) ({ error } = await sb.from('shares').insert({ ...row, post_fp: undefined })); // chưa chạy setup4.sql
   if (error) return toast(error.message);
   closeConfirm();
   toast('Đã ghi nhận! 🎉');
